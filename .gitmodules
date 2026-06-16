@@ -1,3 +1,12 @@
 [submodule "packages/nomad-FAIR"]
 	path = packages/nomad-FAIR
 	url = https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-FAIR.git
+[submodule "plugins/nomad-baseclasses"]
+	path = plugins/nomad-baseclasses
+	url = https://github.com/nomad-hzb/nomad-baseclasses
+[submodule "plugins/nomad-hysprint"]
+	path = plugins/nomad-hysprint
+	url = https://github.com/nomad-hzb/nomad-hysprint
+[submodule "plugins/nomad-tfsc-general"]
+	path = plugins/nomad-tfsc-general
+	url = https://github.com/nomad-hzb/nomad-tfsc-general
