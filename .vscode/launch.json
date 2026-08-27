@@ -80,6 +80,19 @@
       "port": 3000,
       "secret": "my_secret",
       "host": "localhost"
+    },
+    {
+      "name": "API debug",
+      "type": "python",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "module": "uv",
+      "args": ["run", "poe", "start"],
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "env": {
+        "NOMAD_SERVICES_MODE": "development"
+      }
     }
   ]
 }
