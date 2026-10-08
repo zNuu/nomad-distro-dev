@@ -9,6 +9,7 @@ dependencies = [
     "nomad-baseclasses",
     "nomad-hysprint",
     "nomad-lab[parsing, infrastructure]>=1.4.2",
+    "voila>=0.4.0",
     #"nomad-tfsc-general",
 ]
 
