@@ -166,3 +166,5 @@ cython_debug/
 .vscode/launch.json
 nomad.yaml2
 pyproject.toml2
+run/*
+notes/*
