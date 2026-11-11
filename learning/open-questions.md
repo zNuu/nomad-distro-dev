@@ -55,3 +55,32 @@ here when a note turned out to be wrong, then fix the note.
   (`docker-compose.yaml:57`) vs the `temporalio` Python SDK version pinned by
   nomad-lab 2.0.0: unverified offline. If upload processing stalls rather than
   errors, check here first.
+- 2026-11-11 — **Correction.** The rows above assume `nomad-tfsc-general` is
+  commented out and `nomad-hysprint` enabled. Current state is the reverse:
+  `nomad-tfsc-general` **is** a dependency and workspace source
+  (`pyproject.toml:14`, `:23`) and its six entry points are enabled
+  (`nomad.yaml:37-42`), while `nomad-hysprint` is commented out
+  (`pyproject.toml:11`, `:24`; `nomad.yaml:32-36`). The *reason* for the swap is
+  still open.
+- 2026-11-11 — debugpy (Kylin `kylin-python-0.4.3`, bundled debugpy 1.8.1) raises
+  `FileNotFoundError: '/home/a4864/.local/lib/python3.12'` once a client attaches.
+  That path is the `posix_user` stdlib dir, parent of `site.getusersitepackages()`.
+  `FilesFiltering._get_default_library_roots()` adds the *`site-packages`* path, not
+  the parent, and does it without an existence check
+  (`pydevd_filtering.py:142-197`), so it is not the exact source; a bare
+  `python -m debugpy --listen ... --wait-for-client` run does not reproduce it.
+  Next step: run the `API debug (uvicorn)` config and read
+  `/tmp/debugpy-logs/debuggee-*.log` (`DEBUGPY_LOG_DIR`). (context:
+  `.vscode/launch.json:84-98`)
+- 2026-11-11 — Is it intentional that the installed `nomad-gui` wheel is *not*
+  mounted? `GUIAPIEntryPoint(prefix='gui/v2')` (`nomad_gui/apis/__init__.py:498-502`)
+  is only mounted if it survives `entry_points.filtered_values()`
+  (`nomad/app/main.py:246-259`), and the include list (`nomad.yaml:30-42`) has no
+  `nomad_gui.apis:gui_api`. Yet `README.md:298-300` advertises
+  `http://localhost:8000/nomad-oasis/gui/v2/`, and `run/gui.prepare.stamp` reads
+  `/nomad-oasis/gui/v2` — so the plugin *has* been loaded in this checkout at some
+  point. Was the include list narrowed after that?
+- 2026-11-11 — `nomad admin run app --with-gui` copies
+  `nomad/app/static/gui` -> `run/gui_configured` (`nomad/cli/admin/run.py:201-242`),
+  but `app/static/gui` is empty here. Can `--with-gui` ever serve anything in this
+  checkout, or is it a dead path left over from before the v2 GUI became a plugin?

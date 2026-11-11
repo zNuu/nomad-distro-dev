@@ -82,17 +82,34 @@
       "host": "localhost"
     },
     {
-      "name": "API debug",
+      "name": "API debug (uvicorn)",
       "type": "python",
       "request": "launch",
       "cwd": "${workspaceFolder}",
-      "module": "uv",
-      "args": ["run", "poe", "start"],
-      "justMyCode": false,
+      "program": "${workspaceFolder}/.venv/bin/nomad",
+      "args": ["-v", "admin", "run", "app"],
+      "justMyCode": true,
       "console": "integratedTerminal",
       "env": {
-        "NOMAD_SERVICES_MODE": "development"
+        "NOMAD_SERVICES_MODE": "development",
+        "PYDEVD_DISABLE_FILE_VALIDATION": "1",
+        "DEBUGPY_LOG_DIR": "/tmp/debugpy-logs"
       }
+    },
+    {
+      "name": "API debug (appworker, incl. worker)",
+      "type": "python",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/.venv/bin/nomad",
+      "args": ["admin", "run", "appworker", "--dev"],
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "env": {
+        "NOMAD_SERVICES_MODE": "development"
+      },
+      "//comment": "UNTESTED"
     }
   ]
 }
