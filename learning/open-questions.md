@@ -84,3 +84,78 @@ here when a note turned out to be wrong, then fix the note.
   `nomad/app/static/gui` -> `run/gui_configured` (`nomad/cli/admin/run.py:201-242`),
   but `app/static/gui` is empty here. Can `--with-gui` ever serve anything in this
   checkout, or is it a dead path left over from before the v2 GUI became a plugin?
+- 2026-11-18 — **Correction.** An earlier answer claimed the sample-level "best pixel"
+  is picked by argmax over pixels. It is not: `solarcellsample.py:480-496` keeps the
+  highest non-NaN efficiency across `result_data['JVs']` and writes
+  `results.properties.optoelectronic.solar_cell.efficiency`. "Best pixel" is not a
+  sample-level result at all: it is a bool on a pixel section
+  (`solar_energy/mpp_tracking_hysprint_custom.py:76`) that only the hySprint MPPT
+  section uses (`:236`, `:265`, `:269`, `:276-305`).
+- 2026-11-18 — Per-pixel MPPT files (`<lab_id>_cell<n>[_<k>].mpp`) cannot link to their
+  sample because `set_sample_reference` gets the whole stem
+  (`tfsc_general_measurement_parser.py:111-112`). Agreed fix shape: try stem first, then
+  the suffix-stripped id (see Flow 6). Must be applied at **all three** lookup sites
+  (Flow 6 step 7b: parser `:112`, JV normalizer `tfsc_general_package.py:728-730`, MPPT
+  normalizer `:785`). Open: should the suffix pattern live in one
+  helper shared with `TFSC_General_Sample.normalize` batch/subbatch splitting
+  (`tfsc_general_package.py:292-296`), which uses a different rule (`parts[:-2]`)?
+- 2026-11-18 — Is `cell3` in an MPPT file name the same physical pixel as `Pixel_3`
+  from JV curves (`jv_parser.py:110`, `:120`; 0-based index math at `jv_archive.py:56`)?
+  Assumed yes so far; needs confirmation with the lab before `pixel_id` values are used
+  to join JV and MPPT entries. Also open: `_<k>` in `_cell3_2` = repeat run, second
+  channel, or something else?
+- 2026-11-18 — `set_sample_reference` returns silently on 0 hits *and* on >1 hits
+  (`utilities.py:339-344`) with no logger argument. Should it warn (which would need a
+  `logger` parameter threaded from the parsers), or should callers log a missed link?
+  Silent failure is what hid this bug across two uploads.
+- 2026-11-18 — MPPT pixel identity is unrepresentable today: `MPPTracking`
+  (`mpp_tracking.py:442`) has no pixel field, so a `self.pixel_id = ...` assignment is a
+  no-op (see abstractions "Measurement <-> sample linking"). Open: add `pixel_id` +
+  `measurement_no` quantities to `TFSC_General_SimpleMPPTracking`
+  (`tfsc_general_package.py:744`) or upstream to `MPPTracking`, and normalize the value
+  to `pixel_<n>` to match `JVCurve.pixel_id` (`jvmeasurement.py:392`)? Third option
+  surfaced while writing Flow 6: adopt the hySprint shape — one entry with
+  `samples[].pixels[]`, each `PixelData` carrying its own `series_resistance` and a
+  `best_pixel` bool (`mpp_tracking_hysprint_custom.py:71-78`, `:236-305`) — which fits
+  the "all pixels of one sample in one upload" reality better than N sibling entries.
+- 2026-11-18 — **Unverifiable claim, dropped.** A note carried over from an earlier
+  session claimed "`load_mpp_hysprint.py:254-259` filters MPPT rows by
+  `Time_ms == start_time`" and "`:132` hardcodes `series_resistance = 1.2 * ohm`".
+  Neither reproduces: the only such file is
+  `packages/nomad-hysprint/src/nomad_hysprint/schema_packages/file_parser/load_mpp_hysprint.py`
+  (not in `nomad-tfsc-general`), `:132` is a column-name string, and the file ends well
+  before line 254. Treated as hallucinated until someone points at the real code;
+  the hardcoded-series-R concern may still be real somewhere in
+  `nomad-tfsc-general/.../file_parser/mppt_parser.py` — unread here.
+- 2026-11-18 — Verification recipe settled: mongosh proves only that entries exist
+  (mongo `entry` is metadata-only, `processing/data.py:975-994`); the sample link must be
+  read from ES `nomad_entries_v1` (`entry_references`) or from the archive via
+  `files.UploadFiles.get(upload_id).read_archive(entry_id=...)`. Open: confirm the live
+  mongo db name and ES index name in this checkout with `show dbs` /
+  `curl localhost:9200/_cat/indices` and record them here.
+
+- 2026-11-18 — **Answered.** Live storage names in this checkout: mongo db
+  `nomad_v1` only (`docker exec nomad_mongo mongosh --quiet --eval
+  'db.adminCommand({listDatabases:1})'` -> `admin,config,local,nomad_v1`); ES indices
+  `nomad_entries_v1` (1964 docs), `nomad_materials_v1`, `.geoip_databases`
+  (`curl localhost:9200/_cat/indices?v`). Recipe recorded in `abstractions.md`
+  ("Verifying a link"). Note the two `.mpp` entries in the GUI are easy to confuse:
+  the raw one points at `data.processed_archive`, the structured one carries `samples`.
+- 2026-11-18 — Same-upload ordering defeats the link even when the name is perfect.
+  In upload `dkhJ7IaGSF6eyeEJ8vC0ig`, `PERS_INX_BO_3_C-10.iv.archive.json` has **no**
+  `data.samples` and no `entry_references`, although its stem equals the sample's
+  `results.eln.lab_ids` (`["PERS_INX_BO_3_C-10"]`, verified in ES) and re-running the
+  exact query at `utilities.py:329-338` today returns exactly 1 hit. So the lookup ran
+  before the sample entry was indexed. Open: does the pipeline guarantee
+  sample-before-measurement order when both come from one upload, or is reprocessing
+  the only remedy? This matters because the `_cell<n>_<k>` fix alone will still leave
+  same-upload measurements unlinked.
+- 2026-11-18 — **New bug (dispatch case-sensitivity).** `TFSCGeneralParser.parse`
+  routes case-insensitively via `filename_lower`
+  (`tfsc_general_measurement_parser.py:94-107`), but
+  `read_mppt_file` then re-decides with `if 'MPP' in filename.split('.')[-1]`
+  (`file_parser/mppt_parser.py:100`) on the original-case name. A lowercase `.mpp`
+  misses the 'MPP' branch, falls through the `'Time (s)'` sniff and can raise
+  `TypeError('mppt file not recognized')`. Fix: compare `filename.lower()` (or reuse
+  the already-lowercased name).
+

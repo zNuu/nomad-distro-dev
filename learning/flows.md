@@ -139,6 +139,75 @@ Only the *internal* temporal worker runs here; parsers/normalizers live in
    the two scripts never set `window.nomadEnv`, it stays `{}` and the app throws**
    (`:94`). This is the only reason the legacy GUI needs the API.
 
+## Flow 6 — measurement upload: file name -> entry, sample link, structured entry (traced 2026-11-18)
+
+Start: one file `PERS_INX_BO_3_C-10_cell3_2.mpp` in an upload that also contains the
+sample whose `lab_id` is `PERS_INX_BO_3_C-10`.
+
+1. `TFSCGeneralParser.parse` (`packages/nomad-tfsc-general/src/nomad_tfsc_general/parsers/tfsc_general_measurement_parser.py:89`)
+   picks the section class from the extension (`:97-107`; `.mpp` ->
+   `TFSC_General_SimpleMPPTracking` at `:106-107`).
+2. `mainfile_split = os.path.basename(mainfile).split('.')` (`:90`) ->
+   `search_id = mainfile_split[0]` (`:111`) = `PERS_INX_BO_3_C-10_cell3_2`.
+   **Everything downstream keys on this string.**
+3. `archive.metadata.entry_name = os.path.basename(mainfile)` (`:109`) -> the GUI
+   "Name" column keeps the full name incl. extension (`entry_name` is a search
+   quantity, `nomad-FAIR/nomad/datamodel/datamodel.py:621` on `EntryMetadata`; ES doc
+   field built at `nomad/processing/data.py:281`).
+4. `set_sample_reference(archive, entry, search_id, archive.metadata.upload_id)` (`:112`)
+   -> `baseclasses/helper/utilities.py:339` -> `search_sampleid_in_upload` (`:329-336`)
+   queries ES `{'results.eln.lab_ids': 'PERS_INX_BO_3_C-10_cell3_2', 'upload_id': ...}`
+   -> 0 hits -> `return` at `:344`. **`entry.samples` stays None, nothing logged.**
+5. `entry.name = f'{search_id} {".".join(mainfile_split[1:-1])}'` (`:114`) ->
+   `"PERS_INX_BO_3_C-10_cell3_2 "` (extension dropped, trailing space kept). Core
+   `BaseSection.normalize` then mirrors it: `entry_name` is overwritten by `self.name`
+   when the section is `archive.data` and an `EntryData`
+   (`nomad-FAIR/nomad/datamodel/metainfo/basesections/v1.py:253-255`), and `name` is
+   appended to `results.eln.names` (`v1.py:277-280`). So the structured entry's GUI name
+   replaces the raw basename from step 3 — and only the **trailing space** tells the two
+   `.mpp` entries apart.
+6. `file_name = f'{basename(mainfile)}.archive.json'` (`:118`),
+   `eid = get_entry_id_from_file_name(file_name, archive)` (`:119`) ->
+   `hash(archive.metadata.upload_id, file_name)` (`helper/utilities.py:281-284`), so the
+   structured entry has its **own** `entry_id`, distinct from the raw-file entry.
+7. `create_archive(entry, archive, file_name)` (`:121`, def `utilities.py:296-305`)
+   writes `{'data': entry.m_to_dict(with_root_def=True)}` as a *new mainfile* and
+   calls `process_updated_raw_file` (`:303`) -> nomad parses it on the next pass with
+   `ArchiveParser` (`nomad/parsing/parser.py:554`). Only there do the section-level
+   normalizers run: JV at `tfsc_general_package.py:721-741` (re-reads the `.iv`/`.jv`
+   file and calls `get_jv_archive`) and MPPT at `:772+`.
+7b. **The stem lookup is repeated, not shared**: the parser does it at `:112`, the JV
+   normalizer re-derives `search_id = self.data_file.split('.')[0]` and calls
+   `set_sample_reference` again at `:728-730`, and the MPPT normalizer a third time at
+   `:785`. Any naming fix has to cover all three sites.
+8. Sample side never sees the file name: `map_basic_sample`
+   (`helper/solar_cell_batch_mapping.py:218-228`) sets `name` and `lab_id` from the
+   Excel `Nomad ID` column; `TFSC_General_Sample.normalize`
+   (`schema_packages/tfsc_general_package.py:286-296`) is the only code that strips
+   suffixes, and only to build `batch_id` (`'_'.join(parts[:-2])`, `:292-293`) and
+   `subbatch_id` (`'_'.join(parts[:-1])`, `:295-296`).
+
+9. **Verify on the structured entry, not the raw one.** The raw `RawFileTFSCGeneral`
+   entry only references `data.processed_archive` (`:118-121`); `samples` /
+   `entry_references` appear on the `<file>.archive.json` twin. Checking the wrong
+   entry yields a false negative (see abstractions "Verifying a link").
+
+**Observed on a real upload** (`dkhJ7IaGSF6eyeEJ8vC0ig`, 2026-11-18): *both*
+`PERS_INX_BO_3_C-10.iv.archive.json` and `PERS_INX_BO_3_C-10_cell3_2.mpp.archive.json`
+ended with no `data.samples` and no `entry_references` — the `.iv` too, even though the
+sample exists with `results.eln.lab_ids: ["PERS_INX_BO_3_C-10"]`. Re-running the exact
+query from step 4 *now* returns exactly 1 hit, so the `.iv` miss was **ordering**, not
+naming: the sample was not yet indexed when the measurement was parsed (file and sample
+were uploaded together). The suffix fix is necessary but not sufficient — reprocess
+after the sample exists.
+
+**Why the naming still matters:** step 4 is an exact `lab_ids` match. Suffix-free file
+-> stem == `lab_id` -> 1 hit -> linked (once the sample is searchable). Per-pixel file
+-> stem carries `_cell3_2` -> 0 hits -> unlinked, silently, forever. A fix must keep the
+exact stem as the first candidate (suffix-free files are the common case) and retry with
+the suffix-stripped id; `set_sample_reference` is harmless to call twice because it only
+writes on exactly one hit.
+
 ## Not traced yet
 
 - GUI query -> app worker API handler -> Elasticsearch.
